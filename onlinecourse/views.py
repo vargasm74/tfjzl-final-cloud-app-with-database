@@ -5,7 +5,6 @@ from django.views import generic
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.models import User
 import logging
-
 from .models import Course, Enrollment, Question, Choice, Submission
 
 logger = logging.getLogger(__name__)
@@ -106,40 +105,32 @@ def extract_answers(request):
 def submit(request, course_id):
     course = get_object_or_404(Course, pk=course_id)
     user = request.user
-
-    enrollment = get_object_or_404(Enrollment, user=user, course=course)
+    enrollment = Enrollment.objects.get(user=user, course=course)
     submission = Submission.objects.create(enrollment=enrollment)
-
-    choice_ids = extract_answers(request)
-    submission.choices.set(choice_ids)
-
-    return HttpResponseRedirect(
-        reverse('onlinecourse:exam_result', args=(course_id, submission.id,))
-    )
-
+    choices = extract_answers(request)
+    submission.choices.set(choices)
+    submission_id = submission.id
+    return HttpResponseRedirect(reverse(viewname='onlinecourse:exam_result', args=(course_id, submission_id,)))
 
 def show_exam_result(request, course_id, submission_id):
+    context = {}
     course = get_object_or_404(Course, pk=course_id)
-    submission = get_object_or_404(Submission, pk=submission_id)
-
+    submission = Submission.objects.get(id=submission_id)
     choices = submission.choices.all()
 
     total_score = 0
-    for question in course.question_set.all():
-        correct_ids = set(
-            question.choice_set.filter(is_correct=True).values_list("id", flat=True)
-        )
-        selected_ids = set(
-            choices.filter(question=question).values_list("id", flat=True)
-        )
+    questions = course.question_set.all()  # Assuming course has related questions
 
-        if selected_ids == correct_ids:
-            total_score += question.grade
+    for question in questions:
+        correct_choices = question.choice_set.filter(is_correct=True)  # Get all correct choices for the question
+        selected_choices = choices.filter(question=question)  # Get the user's selected choices for the question
 
-    context = {
-        "course": course,
-        "grade": total_score,
-        "choices": choices,
-        "submission": submission,
-    }
-    return render(request, "onlinecourse/exam_result_bootstrap.html", context)
+        # Check if the selected choices are the same as the correct choices
+        if set(correct_choices) == set(selected_choices):
+            total_score += question.grade  # Add the question's grade only if all correct answers are selected
+
+    context['course'] = course
+    context['grade'] = total_score
+    context['choices'] = choices
+
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
